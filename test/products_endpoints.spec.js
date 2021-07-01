@@ -1,181 +1,159 @@
+const { expect } = require('chai')
 const knex = require('knex')
 const app = require('../src/app')
-const helpers = require('./test-helpers')
+const helpers = require('./test-helpers');
 
-describe('Articles Endpoints', function() {
-  let db
-
-  const {
-    testUsers,
-    testArticles,
-    testComments,
-  } = helpers.makeArticlesFixtures()
-
-  before('make knex instance', () => {
-    db = knex({
-      client: 'pg',
-      connection: process.env.TEST_DB_URL,
+describe('Prodcuts Endpoints', () => {
+    let db
+    let testUsers = helpers.testUsers();
+    const testUser = testUsers[0];
+    before('make knex instance', () => {
+      db = knex({
+        client: 'pg',
+        connection: process.env.TEST_DB_URL,
+      })
+      app.set('db', db)
     })
-    app.set('db', db)
-  })
+  
 
-  after('disconnect from db', () => db.destroy())
+    after('disconnect from db', () => db.destroy())
 
-  before('cleanup', () => helpers.cleanTables(db))
+  before('clean the table', () => db.raw('TRUNCATE garages_products, Garages_users RESTART IDENTITY CASCADE'))
 
-  afterEach('cleanup', () => helpers.cleanTables(db))
+  afterEach('cleanup',() => db.raw('TRUNCATE garages_products, Garages_users RESTART IDENTITY CASCADE'))
 
-  describe(`GET /api/articles`, () => {
-    context(`Given no articles`, () => {
-      it(`responds with 200 and an empty list`, () => {
-        return supertest(app)
-          .get('/api/articles')
-          .expect(200, [])
+    describe('GET /api/products', () => {
+      context(`Given no products`, () => {
+        it(`responds with 401 and an empty list`, () => {
+          return supertest(app)
+            .get('/api/products')
+            .set('Authorization', `Bearer ${helpers.createAuthToken(testUser)}`)
+            .expect(401)
+        })
+      })
+  
+    describe('GET /api/products/:product_id', () => {
+      context(`Given no products`, () => {
+        it(`responds 404 Produc doesn't exist`, () => {
+          return supertest(app)
+            .get(`/api/products/123`)
+            .set('Authorization', `Bearer ${helpers.createAuthToken(testUser)}`)
+            .expect(404, {
+              error: { message: `Product doesn't exist` }
+            })
+        })
       })
     })
+    describe('DELETE /api/products/:product_id', () => {
+      context(`Given no products`, () => {
+        it(`responds 404 Product doesn't exist`, () => {
+          return supertest(app)
+            .delete(`/api/products/123`)
+            .set('Authorization', `Bearer ${helpers.createAuthToken(testUser)}`)
+            .expect(404, {
+              error: { message: `Product doesn't exist` }
+            })
+        })
+      })
 
-    context('Given there are articles in the database', () => {
-      beforeEach('insert articles', () =>
-        helpers.seedArticlesTables(
-          db,
-          testUsers,
-          testArticles,
-          testComments,
-        )
-      )
+      context('Given there are products in the database', () => {
+        const product = {
+          product_name: 'test-name',
+          product_price: $111,
+          date_posted: Date,
+          userid: 1,
+          description: 'test-description'
+        }
 
-      it('responds with 200 and all of the articles', () => {
-        const expectedArticles = testArticles.map(article =>
-          helpers.makeExpectedArticle(
-            testUsers,
-            article,
-            testComments,
+        beforeEach('insert products', () => {
+          return db
+            .into('garages_products')
+            .insert(product)
+        })
+  
+        it('removes the product by ID from the database', () => {
+          const idToRemove = 2
+          const expectedProducts = testProducts.filter(bm => bm.id !== idToRemove)
+          return supertest(app)
+            .delete(`/api/products/${idToRemove}`)
+            .set('Authorization', `Bearer ${helpers.createAuthToken(testUser)}`)
+            .expect(204)
+            .then(() =>
+              supertest(app)
+                .get(`/api/products`)
+                .set('Authorization', `Bearer ${helpers.createAuthToken(testUser)}`)
+                .expect(expectedProducts)
+            )
+        })
+      })
+    })
+  
+    describe('POST /api/products', () => {
+      ['product_name','product_price','date_posted','userid','description'].forEach(field => {
+        const newProduct = {
+          product_name: 'test-name',
+          product_price: $111,
+          date_posted: Date,
+          userid: 1,
+          description: 'test-description' 
+        }
+  
+        it(`responds with 400 missing '${field}' if not supplied`, () => {
+          delete newProduct[field]
+          
+          return supertest(app)
+            .post(`/api/products`)
+            .send(newProduct)
+            .set('Authorization', `Bearer ${process.env.API_TOKEN}`)
+            .expect(400, {
+
+              error: { message: `Missing '${field}' in request body` }
+            })
+        })
+      })
+  
+      it('adds a new product to the database', () => {
+        const newProduct = {
+          product_name: 'test-name',
+          product_price: $111,
+          date_posted: Date,
+          userid: 1,
+          description: 'test-description' 
+          
+        }
+        return supertest(app)
+          .post(`/api/products`)
+          .send(newProduct)
+          .set('Authorization', `Bearer ${process.env.API_TOKEN}`)
+          .expect(201)
+          .expect(res => {
+            expect(res.body).to.have.property('id')
+            expect(res.body.product_name).to.eql(newProduct.product_name)
+            expect(res.body.product_price).to.eql(newProduct.product_price)
+            expect(res.body.date_posted).to.eql(newProduct.date_posted)
+            expect(res.body.userid).to.eql(newProduct.userid)
+            expect(res.body.description).to.eql(newProduct.description)
+            expect(res.headers.location).to.eql(`/api/products/${res.body.id}`)
+          })
+          .then(res =>
+            supertest(app)
+              .get(`/api/products/${res.body.id}`)
+              .set('Authorization', `Bearer ${process.env.API_TOKEN}`)
+              .expect(res.body)
           )
-        )
-        return supertest(app)
-          .get('/api/articles')
-          .expect(200, expectedArticles)
       })
     })
-
-    context(`Given an XSS attack article`, () => {
-      const testUser = helpers.makeUsersArray()[1]
-      const {
-        maliciousArticle,
-        expectedArticle,
-      } = helpers.makeMaliciousArticle(testUser)
-
-      beforeEach('insert malicious article', () => {
-        return helpers.seedMaliciousArticle(
-          db,
-          testUser,
-          maliciousArticle,
-        )
+    // ${res.body.id}`)
+    describe(`PATCH /api/products/:product_id`, () => {
+      context(`Given no products`, () => {
+        it(`responds with 404`, () => {
+          const productId = 123456
+          return supertest(app)
+            .patch(`/api/products/${productId}`)
+            .set('Authorization', `Bearer ${process.env.API_TOKEN}`)
+            .expect(404, { error: { message: `Product doesn't exist` } })
+        })
       })
-
-      it('removes XSS attack content', () => {
-        return supertest(app)
-          .get(`/api/articles`)
-          .expect(200)
-          .expect(res => {
-            expect(res.body[0].title).to.eql(expectedArticle.title)
-            expect(res.body[0].content).to.eql(expectedArticle.content)
-          })
       })
     })
   })
-
-  describe(`GET /api/articles/:article_id`, () => {
-    context(`Given no articles`, () => {
-      it(`responds with 404`, () => {
-        const articleId = 123456
-        return supertest(app)
-          .get(`/api/articles/${articleId}`)
-          .expect(404, { error: `Article doesn't exist` })
-      })
-    })
-
-    context('Given there are articles in the database', () => {
-      beforeEach('insert articles', () =>
-        helpers.seedArticlesTables(
-          db,
-          testUsers,
-          testArticles,
-          testComments,
-        )
-      )
-
-      it('responds with 200 and the specified article', () => {
-        const articleId = 2
-        const expectedArticle = helpers.makeExpectedArticle(
-          testUsers,
-          testArticles[articleId - 1],
-          testComments,
-        )
-
-        return supertest(app)
-          .get(`/api/articles/${articleId}`)
-          .expect(200, expectedArticle)
-      })
-    })
-
-    context(`Given an XSS attack article`, () => {
-      const testUser = helpers.makeUsersArray()[1]
-      const {
-        maliciousArticle,
-        expectedArticle,
-      } = helpers.makeMaliciousArticle(testUser)
-
-      beforeEach('insert malicious article', () => {
-        return helpers.seedMaliciousArticle(
-          db,
-          testUser,
-          maliciousArticle,
-        )
-      })
-
-      it('removes XSS attack content', () => {
-        return supertest(app)
-          .get(`/api/articles/${maliciousArticle.id}`)
-          .expect(200)
-          .expect(res => {
-            expect(res.body.title).to.eql(expectedArticle.title)
-            expect(res.body.content).to.eql(expectedArticle.content)
-          })
-      })
-    })
-  })
-
-  describe(`GET /api/articles/:article_id/comments`, () => {
-    context(`Given no articles`, () => {
-      it(`responds with 404`, () => {
-        const articleId = 123456
-        return supertest(app)
-          .get(`/api/articles/${articleId}/comments`)
-          .expect(404, { error: `Article doesn't exist` })
-      })
-    })
-
-    context('Given there are comments for article in the database', () => {
-      beforeEach('insert articles', () =>
-        helpers.seedArticlesTables(
-          db,
-          testUsers,
-          testArticles,
-          testComments,
-        )
-      )
-
-      it('responds with 200 and the specified comments', () => {
-        const articleId = 1
-        const expectedComments = helpers.makeExpectedArticleComments(
-          testUsers, articleId, testComments
-        )
-
-        return supertest(app)
-          .get(`/api/articles/${articleId}/comments`)
-          .expect(200, expectedComments)
-      })
-    })
-  })
-})
