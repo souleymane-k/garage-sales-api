@@ -32,7 +32,7 @@ app.use('/api/auth',authRouter)
 app.use('/api/users',usersRouter)
 app.get('/', (req, res)=>{
     // res.json(STORE)
-res.send('Hello, products-api!')
+res.send('Hello, garages-sales-api!')
 })
 
 
